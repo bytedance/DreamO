@@ -35,8 +35,13 @@ from dreamo.utils import (
 )
 from tools import BEN2
 
+import gc
+
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', type=int, default=8080)
+parser.add_argument("--server_name", type=str, default="127.0.0.1", help="IP地址")
+parser.add_argument("--server_port", type=int, default=7860, help="端口号")
+parser.add_argument("--share", action="store_true", help="是否公开分享")
 parser.add_argument('--no_turbo', action='store_true')
 parser.add_argument('--int8', action='store_true')
 parser.add_argument('--offload', action='store_true')
@@ -193,7 +198,16 @@ def generate_image(
         first_step_guidance_scale=first_step_guidance if first_step_guidance > 0 else guidance,
     ).images[0]
 
+    print(f"Seed: {seed}")
+
     return image, debug_images, seed
+
+def free():
+    generator.dreamo_pipeline.maybe_free_model_hooks()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 
 _HEADER_ = '''
@@ -249,7 +263,7 @@ def create_demo():
                     cfg_start_step = gr.Slider(0, 30, 0, step=1, label="cfg start step")
                     cfg_end_step = gr.Slider(0, 30, 0, step=1, label="cfg end step")
                     first_step_guidance = gr.Slider(0, 10, 0, step=0.1, label="first step guidance")
-                generate_btn = gr.Button("Generate")
+                generate_btn = gr.Button("Generate", variant="primary")
                 gr.Markdown(_CITE_)
 
             with gr.Column():
@@ -398,6 +412,10 @@ def create_demo():
                 first_step_guidance,
             ],
             outputs=[output_image, debug_image, seed_output],
+        ).then(
+            fn=free,
+            inputs=[],
+            outputs=[],
         )
 
     return demo
@@ -405,4 +423,9 @@ def create_demo():
 
 if __name__ == '__main__':
     demo = create_demo()
-    demo.queue().launch(server_name='0.0.0.0', server_port=args.port)
+    demo.queue().launch(
+        server_name=args.server_name, 
+        server_port=args.server_port,
+        share=args.share, 
+        inbrowser=True,
+    )
