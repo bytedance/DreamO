@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# import os
-# os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
 import argparse
+import os
+from datetime import datetime
 
 import cv2
 import gradio as gr
@@ -68,14 +68,41 @@ class Generator:
         model_root = 'black-forest-labs/FLUX.1-dev'
         dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
         dreamo_pipeline.load_dreamo_model(device, use_turbo=not args.no_turbo)
-        if args.int8:
-            print('start quantize')
-            quantize(dreamo_pipeline.transformer, qint8)
-            freeze(dreamo_pipeline.transformer)
-            quantize(dreamo_pipeline.text_encoder_2, qint8)
-            freeze(dreamo_pipeline.text_encoder_2)
-            print('done quantize')
-        self.dreamo_pipeline = dreamo_pipeline.to(device)
+        quantized_model_path = "models/quantized_transformer.pt"
+        quantized_encoder_path = "models/quantized_text_encoder_2.pt"
+
+        try:
+            if args.int8:
+                print('int8 flag detected')
+                quantized_loaded = False
+                if os.path.exists(quantized_model_path) and os.path.exists(quantized_encoder_path):
+                    try:
+                        print('Trying to load quantized models from disk...')
+                        dreamo_pipeline.transformer = torch.load(quantized_model_path, map_location=device, weights_only=False)
+                        dreamo_pipeline.text_encoder_2 = torch.load(quantized_encoder_path, map_location=device, weights_only=False)
+                        print('Loaded quantized models.')
+                        quantized_loaded = True
+                    except Exception as e:
+                        print(f"Failed to load quantized models, falling back to quantizing: {e}")
+
+                if not quantized_loaded:
+                    print('start quantize')
+                    quantize(dreamo_pipeline.transformer, qint8)
+                    freeze(dreamo_pipeline.transformer)
+                    quantize(dreamo_pipeline.text_encoder_2, qint8)
+                    freeze(dreamo_pipeline.text_encoder_2)
+                    print('done quantize')
+                    try:
+                        print('Saving quantized models to disk...')
+                        torch.save(dreamo_pipeline.transformer, quantized_model_path)
+                        torch.save(dreamo_pipeline.text_encoder_2, quantized_encoder_path)
+                        print('Saved quantized models.')
+                    except Exception as e:
+                        print(f"Failed to save quantized models: {e}")
+            self.dreamo_pipeline = dreamo_pipeline.to(device)
+        except Exception as e:
+            print(f"Exception during quantization or pipeline setup: {e}")
+            raise
         if args.offload:
             self.dreamo_pipeline.enable_model_cpu_offload()
             self.dreamo_pipeline.offload = True
@@ -193,6 +220,18 @@ def generate_image(
         first_step_guidance_scale=first_step_guidance if first_step_guidance > 0 else guidance,
     ).images[0]
 
+    # --- PNG output saving block ---
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    filename = f"output_{seed}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
+    filepath = os.path.join(output_dir, filename)
+    if isinstance(image, Image.Image):
+        image.save(filepath, format="PNG")
+    else:
+        Image.fromarray(image).save(filepath, format="PNG")
+    print(f"Image saved to {filepath}")
+    # --- End output saving block ---
+
     return image, debug_images, seed
 
 
@@ -236,12 +275,12 @@ def create_demo():
                     ref_task1 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 1")
                     ref_task2 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 2")
                 prompt = gr.Textbox(label="Prompt", value="a person playing guitar in the street")
-                width = gr.Slider(768, 1024, 1024, step=16, label="Width")
-                height = gr.Slider(768, 1024, 1024, step=16, label="Height")
-                num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps")
-                guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Guidance")
+                width = gr.Slider(768, 4096, 1024, step=16, label="Width")
+                height = gr.Slider(768, 4096, 1024, step=16, label="Height")
+                num_steps = gr.Slider(8, 100, 12, step=1, label="Number of steps")
+                guidance = gr.Slider(1.0, 50.0, 3.5, step=0.1, label="Guidance")
                 seed = gr.Textbox(label="Seed (-1 for random)", value="-1")
-                with gr.Accordion("Advanced Options", open=False, visible=False):
+                with gr.Accordion("Advanced Options", open=False, visible=True):
                     ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image")
                     neg_prompt = gr.Textbox(label="Neg Prompt", value="")
                     neg_guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Neg Guidance")
