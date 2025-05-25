@@ -74,7 +74,7 @@ class Generator:
             dprint("Moving BEN2 model to CPU (offload enabled).")
             self.ben_to_device(torch.device('cpu'))
 
-        model_root = 'black-forest-labs/FLUX.1-dev'
+        model_root = 'ChuckMcSneed/FLUX.1-dev'
         dprint("Loading DreamOPipeline from pretrained weights...")
         dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
         dprint("Loading DreamO model weights...")
