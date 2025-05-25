@@ -74,6 +74,7 @@ class Generator:
             dprint("Moving BEN2 model to CPU (offload enabled).")
             self.ben_to_device(torch.device('cpu'))
 
+        #model_root = 'black-forest-labs/FLUX.1-dev'
         model_root = 'ChuckMcSneed/FLUX.1-dev'
         dprint("Loading DreamOPipeline from pretrained weights...")
         dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
@@ -414,7 +415,7 @@ def create_demo():
                     lora_weights = []
                     for i in range(5):
                         lora_dropdown = gr.Dropdown(choices=["None"], label=f"LoRA {i+1}", value="None")
-                        lora_weight = gr.Slider(0, 2, 1, step=0.01, label=f"Weight {i+1}")
+                        lora_weight = gr.Slider(-5, 5, 1, step=0.01, label=f"Weight {i+1}")
                         lora_dropdowns.append(lora_dropdown)
                         lora_weights.append(lora_weight)
 
@@ -589,4 +590,4 @@ def create_demo():
 
 if __name__ == '__main__':
     demo = create_demo()
-    demo.queue().launch(server_name='0.0.0.0', server_port=args.port)
+    demo.queue().launch(server_name='127.0.0.1', server_port=args.port)
