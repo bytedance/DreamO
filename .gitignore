@@ -6,6 +6,7 @@ wandb/*
 tmp/*
 weights/*
 inputs/*
+models/*
 
 *.DS_Store
 

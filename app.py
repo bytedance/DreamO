@@ -40,15 +40,31 @@ parser.add_argument('--port', type=int, default=8080)
 parser.add_argument('--no_turbo', action='store_true')
 parser.add_argument('--int8', action='store_true')
 parser.add_argument('--offload', action='store_true')
+parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cuda, mps, or cpu')
 args = parser.parse_args()
+
+
+def get_device():
+    """Automatically detect the best available device"""
+    if args.device != 'auto':
+        return torch.device(args.device)
+    
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    else:
+        return torch.device('cpu')
 
 
 class Generator:
     def __init__(self):
-        device = torch.device('cuda')
+        self.device = get_device()
+        print(f"Using device: {self.device}")
+        
         # preprocessing models
         # background remove model: BEN2
-        self.bg_rm_model = BEN2.BEN_Base().to(device).eval()
+        self.bg_rm_model = BEN2.BEN_Base().to(self.device).eval()
         hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir='models')
         self.bg_rm_model.loadcheckpoints('models/BEN2_Base.pth')
         # face crop and align tool: facexlib
@@ -58,7 +74,7 @@ class Generator:
             crop_ratio=(1, 1),
             det_model='retinaface_resnet50',
             save_ext='png',
-            device=device,
+            device=self.device,
         )
         if args.offload:
             self.ben_to_device(torch.device('cpu'))
@@ -67,7 +83,7 @@ class Generator:
         # load dreamo
         model_root = 'black-forest-labs/FLUX.1-dev'
         dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
-        dreamo_pipeline.load_dreamo_model(device, use_turbo=not args.no_turbo)
+        dreamo_pipeline.load_dreamo_model(self.device, use_turbo=not args.no_turbo)
         if args.int8:
             print('start quantize')
             quantize(dreamo_pipeline.transformer, qint8)
@@ -75,7 +91,7 @@ class Generator:
             quantize(dreamo_pipeline.text_encoder_2, qint8)
             freeze(dreamo_pipeline.text_encoder_2)
             print('done quantize')
-        self.dreamo_pipeline = dreamo_pipeline.to(device)
+        self.dreamo_pipeline = dreamo_pipeline.to(self.device)
         if args.offload:
             self.dreamo_pipeline.enable_model_cpu_offload()
             self.dreamo_pipeline.offload = True
@@ -102,7 +118,7 @@ class Generator:
         align_face = self.face_helper.cropped_faces[0]
 
         input = img2tensor(align_face, bgr2rgb=True).unsqueeze(0) / 255.0
-        input = input.to(torch.device("cuda"))
+        input = input.to(self.device)
         parsing_out = self.face_helper.face_parse(normalize(input, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))[0]
         parsing_out = parsing_out.argmax(dim=1, keepdim=True)
         bg_label = [0, 16, 18, 7, 8, 9, 14, 15]
@@ -149,14 +165,14 @@ def generate_image(
         if ref_image is not None:
             if ref_task == "id":
                 if args.offload:
-                    generator.facexlib_to_device(torch.device('cuda'))
+                    generator.facexlib_to_device(generator.device)
                 ref_image = resize_numpy_image_long(ref_image, 1024)
                 ref_image = generator.get_align_face(ref_image)
                 if args.offload:
                     generator.facexlib_to_device(torch.device('cpu'))
             elif ref_task != "style":
                 if args.offload:
-                    generator.ben_to_device(torch.device('cuda'))
+                    generator.ben_to_device(generator.device)
                 ref_image = generator.bg_rm_model.inference(Image.fromarray(ref_image))
                 if args.offload:
                     generator.ben_to_device(torch.device('cpu'))
