@@ -37,8 +37,8 @@ def get_task_embedding_idx(task):
 
 
 class DreamOPipeline(FluxPipeline):
-    def __init__(self, scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer):
-        super().__init__(scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer)
+    def __init__(self, scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer, image_encoder = None, feature_extractor= None):
+        super().__init__(scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer, None, None)
         self.t5_embedding = nn.Embedding(10, 4096)
         self.task_embedding = nn.Embedding(2, 3072)
         self.idx_embedding = nn.Embedding(10, 3072)
@@ -112,9 +112,9 @@ class DreamOPipeline(FluxPipeline):
 
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype, start_height=0, start_width=0):
-        latent_image_ids = torch.zeros(height // 2, width // 2, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height // 2)[:, None] + start_height
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width // 2)[None, :] + start_width
+        latent_image_ids = torch.zeros(height, width, 3)
+        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None] + start_height
+        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :] + start_width
 
         latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
 
@@ -359,7 +359,7 @@ class DreamOPipeline(FluxPipeline):
             cur_width = ref_latent.shape[3]
             ref_latent = self._pack_latents(ref_latent, batch_size, num_channels_latents, cur_height, cur_width)
             ref_latent_image_ids = self._prepare_latent_image_ids(
-                batch_size, cur_height, cur_width, device, prompt_embeds.dtype, start_height, start_width
+                batch_size, cur_height // 2, cur_width // 2, device, prompt_embeds.dtype, start_height, start_width
             )
             start_height += cur_height // 2
             start_width += cur_width // 2
@@ -474,7 +474,6 @@ class DreamOPipeline(FluxPipeline):
 
         if self.offload:
             self.transformer.cpu()
-            torch.cuda.empty_cache()
 
         if output_type == "latent":
             image = latents
@@ -485,9 +484,9 @@ class DreamOPipeline(FluxPipeline):
             image = self.image_processor.postprocess(image, output_type=output_type)
 
         # Offload all models
-        self.maybe_free_model_hooks()
+        #self.maybe_free_model_hooks()
 
         if not return_dict:
-            return (image,)
+            return (image)
 
         return FluxPipelineOutput(images=image)

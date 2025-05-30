@@ -24,6 +24,8 @@ conda create --name dreamo python=3.10
 conda activate dreamo
 # install dependent packages
 pip install -r requirements.txt
+# install dependent packages for 50XX GPUS
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
 
