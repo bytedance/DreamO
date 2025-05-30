@@ -5,10 +5,13 @@ Official implementation of **[DreamO: A Unified Framework for Image Customizatio
 [![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) <br>
 
 ### :triangular_flag_on_post: Updates
-* **2025.05.12**: 🔥🔥 Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
-* **2025.05.11**: 🔥🔥 **We have updated the model to mitigate over-saturation and plastic-face issue**. The new version shows consistent improvements over the previous release. Please check it out!
+* **2025.05.30**: 🔥🔥 Native [ComfyUI implementation](https://github.com/ToTheBeginning/ComfyUI-DreamO) is now available!
+* **2025.05.12**: 🔥 Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
+* **2025.05.11**: 🔥 **We have updated the model to mitigate over-saturation and plastic-face issue**. The new version shows consistent improvements over the previous release. Please check it out!
 * **2025.05.08**: release codes and models
 * 2025.04.24: release DreamO tech report.
+
+https://github.com/user-attachments/assets/385ba166-79df-40d3-bcd7-5472940fa24a
 
 ## :wrench: Dependencies and Installation
 ```bash
@@ -85,6 +88,9 @@ You can use multiple conditions (ID, IP, Try-On) to generate more creative image
 Thanks to the feature routing constraint proposed in the paper, DreamO effectively mitigates conflicts and entanglement among multiple entities.
 
 ![multi_cond_example](https://github.com/user-attachments/assets/e43e6ebb-a028-4b29-b76d-3eaa1e69b9c9)
+
+### ComfyUI
+- native ComfyUI support: [ComfyUI-DreamO](https://github.com/ToTheBeginning/ComfyUI-DreamO)
 
 
 ### Online HuggingFace Demo
