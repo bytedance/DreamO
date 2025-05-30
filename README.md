@@ -43,8 +43,14 @@ We have added support for 8-bit quantization and CPU offload to enable execution
 
 - **For users with 16GB GPUs**, run `python app.py --int8 --offload` to enable CPU offloading alongside int8 quantization. Note that CPU offload significantly reduces inference speed and should only be enabled when necessary.
 
+#### For macOS Apple Silicon (M1/M2/M3/M4)
+DreamO now supports macOS with Apple Silicon chips using Metal Performance Shaders (MPS). The app automatically detects and uses MPS when available.
 
+- **For macOS users**, simply run `python app.py` and the app will automatically use MPS acceleration.
+- **Manual device selection**: You can explicitly specify the device using `python app.py --device mps` (or `--device cpu` if needed).
+- **Memory optimization**: For devices with limited memory, you can combine MPS with quantization: `python app.py --device mps --int8`
 
+**Note**: Make sure you have PyTorch with MPS support installed. The current requirements.txt includes PyTorch 2.6.0+ which has full MPS support.
 
 ### Supported Tasks
 #### IP
