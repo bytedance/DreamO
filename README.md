@@ -5,9 +5,10 @@ Official implementation of **[DreamO: A Unified Framework for Image Customizatio
 [![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) <br>
 
 ### :triangular_flag_on_post: Updates
-* **2025.05.30**: 🔥🔥 Native [ComfyUI implementation](https://github.com/ToTheBeginning/ComfyUI-DreamO) is now available!
-* **2025.05.12**: 🔥 Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
-* **2025.05.11**: 🔥 **We have updated the model to mitigate over-saturation and plastic-face issue**. The new version shows consistent improvements over the previous release. Please check it out!
+* **2025.06.24**: 🔥🔥**We are excited to release DreamO v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics**. [Learn more about the model](dreamo_v1.1.md)
+* **2025.05.30**: 🔥 Native [ComfyUI implementation](https://github.com/ToTheBeginning/ComfyUI-DreamO) is now available!
+* **2025.05.12**: Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
+* **2025.05.11**: We have updated the model to mitigate over-saturation and plastic-face issue. The new version shows consistent improvements over the previous release. Please check it out!
 * **2025.05.08**: release codes and models
 * 2025.04.24: release DreamO tech report.
 
@@ -32,6 +33,8 @@ pip install -r requirements.txt
 ```bash
 python app.py
 ```
+**v1.1**: By default, it will use the latest v1.1 model, if you want to switch back to v1 model, you can use `--version v1`
+
 We observe strong compatibility between DreamO and the accelerated FLUX LoRA variant 
 ([FLUX-turbo](https://huggingface.co/alimama-creative/FLUX.1-Turbo-Alpha)), and thus enable Turbo LoRA by default, 
 reducing inference to 12 steps (vs. 25+ by default). Turbo can be disabled via `--no_turbo`, though our evaluation shows mixed results; 

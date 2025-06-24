@@ -37,6 +37,7 @@ from tools import BEN2
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=8080)
+parser.add_argument('--version', type=str, default='v1.1')
 parser.add_argument('--no_turbo', action='store_true')
 parser.add_argument('--int8', action='store_true')
 parser.add_argument('--offload', action='store_true')
@@ -219,12 +220,12 @@ _HEADER_ = '''
 </div>
 
 🚩 Update Notes:
+- 2025.06.24: Updated to v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics. <a href='https://github.com/bytedance/DreamO/blob/main/dreamo_v1.1.md' target='_blank'>Learn more about this model</a>
 - 2025.05.11: We have updated the model to mitigate over-saturation and plastic-face issues. The new version shows consistent improvements over the previous release.
 
 ❗️❗️❗️**User Guide:**
 - The most important thing to do first is to try the examples provided below the demo, which will help you better understand the capabilities of the DreamO model and the types of tasks it currently supports
 - For each input, please select the appropriate task type. For general objects, characters, or clothing, choose IP — we will remove the background from the input image. If you select ID, we will extract the face region from the input image (similar to PuLID). If you select Style, the background will be preserved, and you must prepend the prompt with the instruction: 'generate a same style image.' to activate the style task.
-- The most import hyperparameter in this demo is the guidance scale, which is set to 3.5 by default. If you notice that faces appear overly glossy or unrealistic—especially in ID tasks—you can lower the guidance scale (e.g., to 3). Conversely, if text rendering is poor or limb distortion occurs, increasing the guidance scale (e.g., to 4) may help.
 - To accelerate inference, we adopt FLUX-turbo LoRA, which reduces the sampling steps from 25 to 12 compared to FLUX-dev. Additionally, we distill a CFG LoRA, achieving nearly a twofold reduction in steps by eliminating the need for true CFG
 
 '''  # noqa E501
@@ -255,10 +256,10 @@ def create_demo():
                 width = gr.Slider(768, 1024, 1024, step=16, label="Width")
                 height = gr.Slider(768, 1024, 1024, step=16, label="Height")
                 num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps")
-                guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Guidance")
+                guidance = gr.Slider(1.0, 10.0, 4.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance")
                 seed = gr.Textbox(label="Seed (-1 for random)", value="-1")
+                ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image, increase it if necessary")
                 with gr.Accordion("Advanced Options", open=False, visible=False):
-                    ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image")
                     neg_prompt = gr.Textbox(label="Neg Prompt", value="")
                     neg_guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Neg Guidance")
                     true_cfg = gr.Slider(1, 5, 1, step=0.1, label="true cfg")
@@ -351,7 +352,7 @@ def create_demo():
                     'id',
                     'ip',
                     'the woman wearing a dress, In the banquet hall',
-                    7698454872441022867,
+                    42,
                 ],
             ]
             gr.Examples(
@@ -383,7 +384,7 @@ def create_demo():
                     'ip',
                     'ip',
                     'a man is dancing with a woman in the room',
-                    8303780338601106219,
+                    42,
                 ],
             ]
             gr.Examples(
