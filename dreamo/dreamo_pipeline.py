@@ -31,6 +31,11 @@ from dreamo.utils import convert_flux_lora_to_diffusers
 
 diffusers.models.transformers.transformer_flux.FluxTransformer2DModel.forward = flux_transformer_forward
 
+# Using nunchaku
+from nunchaku import NunchakuFluxTransformer2dModel
+from nunchaku.lora.flux.compose import compose_lora
+NunchakuFluxTransformer2dModel.forward = flux_transformer_forward
+
 
 def get_task_embedding_idx(task):
     return 0
@@ -118,6 +123,93 @@ class DreamOPipeline(FluxPipeline):
         self.t5_embedding = self.t5_embedding.to(device)
         self.task_embedding = self.task_embedding.to(device)
         self.idx_embedding = self.idx_embedding.to(device)
+        
+        
+    # nunchaku
+    def load_dreamo_model_nunchaku(self, device, use_turbo=True, version='v1.1'):
+        # download models and load file
+        if version == 'v1':#Add commentMore actions
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_quality_lora_pos.safetensors', local_dir='models')
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_quality_lora_neg.safetensors', local_dir='models')
+            quality_lora_pos = load_file('models/dreamo_quality_lora_pos.safetensors')
+            quality_lora_neg = load_file('models/dreamo_quality_lora_neg.safetensors')
+        elif version == 'v1.1':
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='v1.1/dreamo_sft_lora.safetensors', local_dir='models')
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='v1.1/dreamo_dpo_lora.safetensors', local_dir='models')
+            sft_lora = load_file('models/v1.1/dreamo_sft_lora.safetensors')
+            dpo_lora = load_file('models/v1.1/dreamo_dpo_lora.safetensors')
+        else:
+            raise ValueError(f'there is no {version}')
+        
+        
+        # download models and load file
+        hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo.safetensors', local_dir='models')
+        hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_cfg_distill.safetensors', local_dir='models')
+        dreamo_lora = load_file('models/dreamo.safetensors')
+        cfg_distill_lora = load_file('models/dreamo_cfg_distill.safetensors')
+
+        # load embedding
+        self.t5_embedding.weight.data = dreamo_lora.pop('dreamo_t5_embedding.weight')[-10:]
+        self.task_embedding.weight.data = dreamo_lora.pop('dreamo_task_embedding.weight')
+        self.idx_embedding.weight.data = dreamo_lora.pop('dreamo_idx_embedding.weight')
+        self._prepare_t5()
+
+        # main lora
+        dreamo_lora = convert_flux_lora_to_diffusers(dreamo_lora)
+        cfg_distill_lora = convert_flux_lora_to_diffusers(cfg_distill_lora)
+        
+        # others lora
+        others = []
+        
+        # turbo_lora 如果使用 nunchaku，建议加载！可有效减少生成步数！
+        use_turbo = True # 建议强制开启
+        if use_turbo:
+            hf_hub_download("alimama-creative/FLUX.1-Turbo-Alpha", "diffusion_pytorch_model.safetensors", local_dir='models')
+            turbo_lora = load_file('models/diffusion_pytorch_model.safetensors')
+            # 添加到lora列表
+            others.append((turbo_lora, 1))
+
+        
+        if version == 'v1':
+            # quality loras, one pos, one neg
+            convert_flux_lora_to_diffusers(quality_lora_pos)
+            convert_flux_lora_to_diffusers(quality_lora_neg)
+            # 添加到lora列表
+            others.append((quality_lora_pos, 0.15))
+            others.append((quality_lora_neg, -0.8))
+        elif version == 'v1.1':
+            # 添加到lora列表
+            others.append((sft_lora, 1))
+            others.append((dpo_lora, 1.25))
+            pass
+        
+        
+        # 可选加载第三方增强LoRA：皮肤白皙去除塑料
+        # enhance_lora = load_file('models/loras/F1_皮肤白皙去除塑料.safetensors')
+        # others.append((enhance_lora, 1))
+        
+        # nunchaku lora
+        composed_lora = compose_lora(
+            [
+                (dreamo_lora, 1), 
+                (cfg_distill_lora, 1),
+            ] + others
+        )
+        if isinstance(self.transformer, NunchakuFluxTransformer2dModel):
+            print("======== update_nunchaku_lora_params ========")
+            self.transformer.update_lora_params(composed_lora)
+            self.transformer = self.transformer.to(device)
+            # FP16 注意力实现，可在 NVIDIA 30、40 甚至 50 系列 GPU 上实现高达 1.2× 的性能提升 ，而不会降低精度。
+            self.transformer.set_attention_impl("nunchaku-fp16")
+        else:
+            raise ValueError(f'The transformer model must be nunchaku SVDQuant')
+
+        self.unload_lora_weights()
+
+        self.t5_embedding = self.t5_embedding.to(device)
+        self.task_embedding = self.task_embedding.to(device)
+        self.idx_embedding = self.idx_embedding.to(device)
+        
 
     def _prepare_t5(self):
         self.text_encoder_2.resize_token_embeddings(len(self.tokenizer_2))
