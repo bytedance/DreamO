@@ -2,7 +2,7 @@
 
 Official implementation of **[DreamO: A Unified Framework for Image Customization](https://arxiv.org/abs/2504.16915)**
 
-[![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) <br>
+[![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) [![Replicate](https://replicate.com/zsxkib/dream-o/badge)](https://replicate.com/zsxkib/dream-o) <br>
 
 ### :triangular_flag_on_post: Updates
 * **2025.06.24**: 🔥🔥**We are excited to release DreamO v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics**. [Learn more about the model](dreamo_v1.1.md)

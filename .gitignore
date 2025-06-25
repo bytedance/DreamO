@@ -141,3 +141,7 @@ dmypy.json
 .pyre/
 
 .idea/
+
+# Replicate
+.cog
+/model_cache/*
