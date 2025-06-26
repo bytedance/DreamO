@@ -5,6 +5,7 @@ Official implementation of **[DreamO: A Unified Framework for Image Customizatio
 [![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) <br>
 
 ### :triangular_flag_on_post: Updates
+* **2025.06.26**: [Nunchaku](https://github.com/mit-han-lab/nunchaku) is now supported for model quantization.
 * **2025.06.24**: 🔥🔥**We are excited to release DreamO v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics**. [Learn more about the model](dreamo_v1.1.md)
 * **2025.05.30**: 🔥 Native [ComfyUI implementation](https://github.com/ToTheBeginning/ComfyUI-DreamO) is now available!
 * **2025.05.12**: Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
@@ -15,6 +16,7 @@ Official implementation of **[DreamO: A Unified Framework for Image Customizatio
 https://github.com/user-attachments/assets/385ba166-79df-40d3-bcd7-5472940fa24a
 
 ## :wrench: Dependencies and Installation
+**note for v1.1**: In order to use Nunchaku for model quantization, we have updated the diffusers version to 0.33.1. If you have the older version 0.31.0 installed, please update diffusers; otherwise, the code will throw errors.
 ```bash
 # clone DreamO repo
 git clone https://github.com/bytedance/DreamO.git
@@ -26,6 +28,7 @@ conda activate dreamo
 # install dependent packages
 pip install -r requirements.txt
 ```
+**(optional) Nunchaku**: If you want to use Nunchaku for model quantization, please refer to the [original repo](https://github.com/mit-han-lab/nunchaku) for installation guide.
 
 
 ## :zap: Quick Inference
@@ -33,7 +36,15 @@ pip install -r requirements.txt
 ```bash
 python app.py
 ```
-**v1.1**: By default, it will use the latest v1.1 model, if you want to switch back to v1 model, you can use `--version v1`
+```console
+options:
+  --version {v1.1,v1}   default will use the latest v1.1 model, you can also switch back to v1
+  --offload             Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.
+  --no_turbo            Use turbo to reduce the original 25 steps to 12 steps.
+  --quant {none,int8,nunchaku}
+                        Quantize to use: none(bf16), int8, nunchaku
+  --device DEVICE       Device to use: auto, cuda, mps, or cpu
+```
 
 We observe strong compatibility between DreamO and the accelerated FLUX LoRA variant 
 ([FLUX-turbo](https://huggingface.co/alimama-creative/FLUX.1-Turbo-Alpha)), and thus enable Turbo LoRA by default, 
@@ -43,9 +54,10 @@ we therefore recommend keeping Turbo enabled.
 **tips**: If you observe limb distortion or poor text generation, try increasing the guidance scale; if the image appears overly glossy or over-saturated, consider lowering the guidance scale.
 
 #### For consumer-grade GPUs
-We have added support for 8-bit quantization and CPU offload to enable execution on consumer-grade GPUs. This requires the `optimum-quanto` library, and thus the PyTorch version in `requirements.txt` has been upgraded to 2.6.0. If you are using an older version of PyTorch, you may need to reconfigure your environment.
+Currently, the code supports two quantization schemes: int8 from [optimum-quanto](https://github.com/huggingface/optimum-quanto) and [Nunchaku](https://github.com/mit-han-lab/nunchaku). You can choose either one based on your needs and the actual results.
+- **For users with 8GB GPUs**, run `python app.py --nunchaku --offload` to enable CPU offloading alongside nunchaku quantization. According to the [feedback](https://github.com/bytedance/DreamO/pull/99), it takes about 20 seconds to generate a 1024-resolution image on NVIDIA 3080.
 
-- **For users with 24GB GPUs**, run `python app.py --int8` to enable the int8-quantized model.
+- **For users with 24GB GPUs**, run `python app.py --quant int8` to enable the int8-quantized model or `python app.py --quant nunchaku` to enable the nunchaku-quantized model.
 
 - **For users with 16GB GPUs**, run `python app.py --int8 --offload` to enable CPU offloading alongside int8 quantization. Note that CPU offload significantly reduces inference speed and should only be enabled when necessary.
 
