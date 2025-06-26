@@ -230,3 +230,16 @@ def convert_flux_lora_to_diffusers(old_state_dict):
     #     raise ValueError(f"`old_state_dict` should be at this point but has: {list(old_state_dict.keys())}.")
 
     return new_state_dict
+
+
+def get_device(device='auto'):
+    """Automatically detect the best available device"""
+    if device != 'auto':
+        return torch.device(device)
+    
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    else:
+        return torch.device('cpu')
