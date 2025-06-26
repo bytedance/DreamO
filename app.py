@@ -22,11 +22,13 @@ from dreamo_generator import Generator
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=8080)
-parser.add_argument('--version', type=str, default='v1.1')
-parser.add_argument('--offload', action='store_true', default=True, help="Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.")
-parser.add_argument('--no_turbo', action='store_true', default=False, help='Use turbo to reduce the original 50 steps to 12 steps.')
-parser.add_argument('--quant', type=str, default='nunchaku', help='Quantize to use: default, int8, nunchaku')  # default, int8, nunchaku
-parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cuda, mps, or cpu') # auto, cuda, mps, or cpu
+parser.add_argument('--version', type=str, default='v1.1', choices=['v1.1', 'v1'],
+                    help='default will use the latest v1.1 model, you can also switch back to v1')
+parser.add_argument('--offload', action='store_true', help="Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.")
+parser.add_argument('--no_turbo', action='store_true', help='Use turbo to reduce the original 25 steps to 12 steps.')
+parser.add_argument('--quant', type=str, default='none', choices=['none', 'int8', 'nunchaku'],
+                    help='Quantize to use: none(bf16), int8, nunchaku')
+parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cuda, mps, or cpu')
 args = parser.parse_args()
 
 
@@ -38,13 +40,13 @@ args = parser.parse_args()
 
 # 👉️ Parameter Description: quant = 'nunchaku', no_turbo = False, offload = True
 # -------------------------------------------------------------------------------------------------------------------
-# [ no_turbo = False ]:  Use 'turbo' to reduce the original 50 steps to 12 steps.
+# [ no_turbo = False ]:  Use 'turbo' to reduce the original 25 steps to 12 steps.
 # [ offload = True   ]:  Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.
 # -------------------------------------------------------------------------------------------------------------------
 
 # 👉️ Inference VRAM usage: For example, NVIDIA RTX 3080-10G 
 # -------------------------------------------------------------------------------------------------------------------
-# [ quant= 'default' ]:  offload, 24GB  VRAM.  ⚠️ CUDA out of memory.
+# [ quant= 'none' ]:  offload, 24GB  VRAM.  ⚠️ CUDA out of memory.
 # [ quant= 'int8'    ]:  offload, 16GB  VRAM.  ⚠️ CUDA out of memory.
 # [ quant= 'nunchaku']:  offload, 6.5GB VRAM.  ✅️ Working fine! So it supports consumer-grade GPUs (8GB or higher) now.
 # -------------------------------------------------------------------------------------------------------------------
@@ -57,10 +59,8 @@ generator = Generator(**vars(args))
 def generate_image(
     ref_image1,
     ref_image2,
-    ref_image3,
     ref_task1,
     ref_task2,
-    ref_task3,
     prompt,
     width,
     height,
@@ -74,20 +74,16 @@ def generate_image(
     neg_prompt,
     neg_guidance,
     first_step_guidance,
-    progress=gr.Progress(),
 ):
-    print(prompt)
-    
-    # Input condition preprocessing torch.Size([1, 3, 576, 432])
     ref_conds, debug_images, seed = generator.pre_condition(
-        ref_images=[ref_image1, ref_image2, ref_image3],
-        ref_tasks=[ref_task1, ref_task2, ref_task3],
+        ref_images=[ref_image1, ref_image2],
+        ref_tasks=[ref_task1, ref_task2],
         ref_res=ref_res,
         seed=seed,
         )
+    print(prompt, seed)
 
     print("start dreamo_pipeline... ")
-    generator.dreamo_pipeline.gr_progress = progress
     image = generator.dreamo_pipeline(
         prompt=prompt,
         width=width,
@@ -103,7 +99,7 @@ def generate_image(
         neg_guidance_scale=neg_guidance,
         first_step_guidance_scale=first_step_guidance if first_step_guidance > 0 else guidance,
     ).images[0]
-    
+
     return image, debug_images, seed
 
 
@@ -114,7 +110,7 @@ _HEADER_ = '''
 </div>
 
 🚩 Update Notes:
-- 2025.06.25: Use Nunchaku to achieve <7GB VRAM inference and 2-4 times faster inference. by juntaosun.  
+- 2025.06.26: Use Nunchaku to achieve <7GB VRAM inference and 2-4 times faster inference. Contributed by juntaosun.  
 - 2025.06.24: Updated to v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics. <a href='https://github.com/bytedance/DreamO/blob/main/dreamo_v1.1.md' target='_blank'>Learn more about this model</a>
 - 2025.05.11: We have updated the model to mitigate over-saturation and plastic-face issues. The new version shows consistent improvements over the previous release.
 
@@ -142,23 +138,20 @@ def create_demo():
         with gr.Row():
             with gr.Column():
                 with gr.Row():
-                    ref_image1 = gr.Image(label="ref image 1", type="numpy", height=256) # 参考图 1
-                    ref_image2 = gr.Image(label="ref image 2", type="numpy", height=256) # 参考图 2
-                    ref_image3 = gr.Image(label="ref image 3", type="numpy", height=256) # 参考图 3
+                    ref_image1 = gr.Image(label="ref image 1", type="numpy", height=256)
+                    ref_image2 = gr.Image(label="ref image 2", type="numpy", height=256)
                 with gr.Row():
                     with gr.Group():
                         ref_task1 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 1")
                     with gr.Group():
                         ref_task2 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 2")
-                    with gr.Group():
-                        ref_task3 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 3")
                 prompt = gr.Textbox(label="Prompt", value="a person playing guitar in the street")
                 generate_btn = gr.Button("🎉 Generate")
                 
                 width = gr.Slider(768, 1024, 1024, step=16, label="Width")
                 height = gr.Slider(768, 1024, 1024, step=16, label="Height")
-                num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps") # 默认步数 12
-                guidance = gr.Slider(1.0, 10.0, 3.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance") # 建议 3.5
+                num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps")
+                guidance = gr.Slider(1.0, 10.0, 4.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance")
                 seed = gr.Textbox(label="Seed (-1 for random)", value="-1")
                 ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image, increase it if necessary")
                 with gr.Accordion("Advanced Options", open=False, visible=False):
@@ -299,10 +292,8 @@ def create_demo():
             inputs=[
                 ref_image1,
                 ref_image2,
-                ref_image3,
                 ref_task1,
                 ref_task2,
-                ref_task3,
                 prompt,
                 width,
                 height,

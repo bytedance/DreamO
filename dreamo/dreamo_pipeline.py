@@ -42,12 +42,7 @@ class DreamOPipeline(FluxPipeline):
         self.t5_embedding = nn.Embedding(10, 4096)
         self.task_embedding = nn.Embedding(2, 3072)
         self.idx_embedding = nn.Embedding(10, 3072)
-        self.is_nunchaku = False # nunchaku mark
-        self.gr_progress = None
-        
-    def update_gr_progress(self, value, desc):
-        if self.gr_progress is not None:
-            self.gr_progress(value, desc=desc)
+        self.use_nunchaku = False
 
     def load_dreamo_model(self, device, use_turbo=True, version='v1.1'):
         # download models and load file
@@ -124,9 +119,7 @@ class DreamOPipeline(FluxPipeline):
         self.t5_embedding = self.t5_embedding.to(device)
         self.task_embedding = self.task_embedding.to(device)
         self.idx_embedding = self.idx_embedding.to(device)
-        
-        
-    
+
     # Using nunchaku
     def load_dreamo_model_nunchaku(self, device, use_turbo=True, version='v1.1'):
         
@@ -173,52 +166,33 @@ class DreamOPipeline(FluxPipeline):
         # others lora
         others = []
         
-        # turbo_lora 如果使用 nunchaku，建议加载！可有效减少生成步数！
-        use_turbo = True # 建议强制开启
         if use_turbo:
             print(f'load turbo lora ...')
             hf_hub_download("alimama-creative/FLUX.1-Turbo-Alpha", "diffusion_pytorch_model.safetensors", local_dir='models')
             turbo_lora = load_file('models/diffusion_pytorch_model.safetensors')
-            # 添加到lora列表
             others.append((turbo_lora, 1))
 
-        
         if version == 'v1':
             # quality loras, one pos, one neg
             convert_flux_lora_to_diffusers(quality_lora_pos)
             convert_flux_lora_to_diffusers(quality_lora_neg)
-            # 添加到lora列表
             others.append((quality_lora_pos, 0.15))
             others.append((quality_lora_neg, -0.8))
         elif version == 'v1.1':
-            # 添加到lora列表
             others.append((sft_lora, 1))
             others.append((dpo_lora, 1.25))
             pass
-        
-        
-        # 可选加载第三方增强LoRA：皮肤白皙去除塑料
-        # enhance_lora = load_file('models/loras/F1_皮肤白皙去除塑料.safetensors')
-        # others.append((enhance_lora, 1))
-        
-        # nunchaku lora
+
+        # compose lora
         composed_lora = compose_lora(
             [
                 (dreamo_lora, 1), 
                 (cfg_distill_lora, 1),
             ] + others
         )
-        if isinstance(self.transformer, NunchakuFluxTransformer2dModel):
-            print("======== update_nunchaku_lora_params ========")
-            self.transformer.update_lora_params(composed_lora)
-            self.transformer = self.transformer.to(device)
-            # FP16 注意力实现，可在 NVIDIA 30、40 甚至 50 系列 GPU 上实现高达 1.2× 的性能提升 ，而不会降低精度。
-            self.transformer.set_attention_impl("nunchaku-fp16")
-            self.is_nunchaku = True
-        else:
-            raise ValueError(f'The transformer model must be nunchaku SVDQuant')
-
+        self.transformer.update_lora_params(composed_lora)
         self.unload_lora_weights()
+        self.use_nunchaku = True
 
         self.t5_embedding = self.t5_embedding.to(device)
         self.task_embedding = self.task_embedding.to(device)
@@ -384,9 +358,6 @@ class DreamOPipeline(FluxPipeline):
 
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
-        
-        # progress
-        self.update_gr_progress(0.0, "Preprocessing, please wait...")
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -539,7 +510,6 @@ class DreamOPipeline(FluxPipeline):
             self._joint_attention_kwargs = {}
 
         # 6. Denoising loop
-        self.update_gr_progress(0.0, "inference_steps...")
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -596,12 +566,11 @@ class DreamOPipeline(FluxPipeline):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-                    self.update_gr_progress((i+1)/num_inference_steps, f"inference steps：（{(i+1)}/{num_inference_steps}）...")
 
         self._current_timestep = None
 
         # nunchaku automatic
-        if self.offload and not self.is_nunchaku:
+        if self.offload and not self.use_nunchaku:
             self.transformer.cpu()
         torch.cuda.empty_cache()
 
@@ -613,7 +582,7 @@ class DreamOPipeline(FluxPipeline):
             image = self.vae.decode(latents, return_dict=False)[0]
             image = self.image_processor.postprocess(image, output_type=output_type)
 
-        # # Offload all models
+        # Offload all models
         self.maybe_free_model_hooks()
         torch.cuda.empty_cache()
 

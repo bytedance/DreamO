@@ -17,7 +17,6 @@ import re
 
 import cv2
 import numpy as np
-import PIL.Image
 import torch
 from torchvision.utils import make_grid
 

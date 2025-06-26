@@ -43,7 +43,7 @@ class Generator:
         self.version = args.pop("version", "v1.1")
         self.offload = args.pop("offload", True) 
         self.no_turbo = args.pop("no_turbo", False)
-        self.quant = args.pop("quant", "default") # Quantize to use: default, int8, nunchaku
+        self.quant = args.pop("quant", "none") # Quantize to use: none, int8, nunchaku
         self.device = get_device(args.pop("device", "auto")) # Device to use: auto, cuda, mps, or cpu
         print(f"Using device: {self.device} offload: {self.offload} quant: {self.quant}")
         
@@ -78,9 +78,9 @@ class Generator:
     def dreamo_pipeline_init_default(self):
         # load dreamo
         model_root = 'black-forest-labs/FLUX.1-dev'
-        if os.path.exists(f'./models/{model_root}'):model_root = f'./models/{model_root}' # 兼容目录 ./models
+        if os.path.exists(f'./models/{model_root}'):model_root = f'./models/{model_root}'
         self.dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
-        self.dreamo_pipeline.load_dreamo_model(self.device, use_turbo=self.no_turbo)
+        self.dreamo_pipeline.load_dreamo_model(self.device, use_turbo=not self.no_turbo)
         # Quantize the model using int8, which may take some time
         if self.quant == "int8":
             # pip install optimum
@@ -98,23 +98,14 @@ class Generator:
         else:
             self.dreamo_pipeline.offload = False
         
-        print(f"\n[Profiler] Total Generator initialization ({self.quant}).")
+        print(f"\n[Profiler] pipeline init done ({self.quant}).")
         pass
         
-    # Fast inference using nunchaku by juntaosun  
+    # nunchaku support by juntaosun
     def dreamo_pipeline_init_nunchaku(self):
-        """ 使用 Nunchaku 实现2-4倍高速推理 <7GB 低显存占用。by juntaosun  
-            参考速度：3080 显卡 1024x1024 ,12 steps, 15-20s 生成.     
-            Description: Use Nunchaku to achieve 2-4 times faster inference and <7GB low VRAM usage.    
+        """ Description: Use Nunchaku to achieve 2-4 times faster inference and <7GB low VRAM usage.
             Reference speed: 3080 graphics card 1024x1024, 12 steps, 15-20s to generate.  
         """
-        
-        try:
-            # 依赖检测：nunchaku 需调用 SanaTransformer2DModel。条件版本 >=0.32.2
-            from diffusers import SanaTransformer2DModel
-        except Exception as e:
-            raise ValueError("nunchaku requires version:\n 👉️ pip install diffusers==0.32.2")
-        
         try:
             # 依赖检测：The current version has been tested: nunchaku v0.3.x
             from nunchaku import NunchakuFluxTransformer2dModel
@@ -132,12 +123,12 @@ class Generator:
         # download models and load file (~7GB)
         precision = get_precision()  # auto-detect your precision is 'int4' or 'fp4' based on your GPU
         svdq_filename = f"svdq-{precision}_r32-flux.1-dev.safetensors"
-        print(f'svdq_filename: {svdq_filename}')
         hf_hub_download(repo_id='mit-han-lab/nunchaku-flux.1-dev', filename=svdq_filename, local_dir='models')
         transformer:NunchakuFluxTransformer2dModel = NunchakuFluxTransformer2dModel.from_pretrained(
             f"models/{svdq_filename}",
             offload=self.offload,
         )
+        transformer.set_attention_impl("nunchaku-fp16")  # set attention implementation to fp16
         
         print("\n[Profiler] Loading DreamOPipeline from pretrained (FLUX base)...")
         dreamo_pipeline_load_start_time = time.time()
@@ -153,24 +144,19 @@ class Generator:
             
         print(f"\n[Profiler] Moving final DreamOPipeline to device ({self.device})...")
         to_device_start_time = time.time()
+        apply_cache_on_pipe(self.dreamo_pipeline, residual_diff_threshold=0.05)
         if self.offload:
-            self.dreamo_pipeline.enable_model_cpu_offload()
+            self.dreamo_pipeline.enable_sequential_cpu_offload()
             self.dreamo_pipeline.offload = True
         else:
             self.dreamo_pipeline.offload = False
+            self.dreamo_pipeline.to(self.device)
         print(f"[Profiler] DreamOPipeline moved to device (with explicit component moves) in {time.time() - to_device_start_time:.2f} seconds.")
             
-        #  参数用于控制是否启用注意力切片技术。当 GPU 显存有限时，启用此参数可以减少 VRAM 使用，但可能会牺牲一定的计算速度。
         self.dreamo_pipeline.enable_attention_slicing()
         self.dreamo_pipeline.enable_vae_tiling()
-        
-        # nunchaku CPU Offloading  CPU 卸载,初始化时设置 offload=True，然后调用：
-        self.dreamo_pipeline.enable_sequential_cpu_offload()
-        # nunchaku 块缓存,建议的值为 0.12，它为 50 级降噪提供高达 2× 的加速。对于 turbo 12步时建议>=0.05
-        apply_cache_on_pipe(self.dreamo_pipeline, residual_diff_threshold=0.05)
 
         print(f"\n[Profiler] Total Generator initialization ({self.quant}).")
-        pass
 
     def ben_to_device(self, device):
         self.bg_rm_model.to(device)
