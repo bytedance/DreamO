@@ -4,7 +4,7 @@ protobuf
 optimum-quanto==0.2.7
 einops
 timm
-diffusers==0.31.0
+diffusers==0.32.2
 transformers==4.45.2
 sentencepiece
 gradio

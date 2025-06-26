@@ -37,11 +37,17 @@ def get_task_embedding_idx(task):
 
 
 class DreamOPipeline(FluxPipeline):
-    def __init__(self, scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer):
-        super().__init__(scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer)
+    def __init__(self, scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer, image_encoder = None, feature_extractor= None):
+        super().__init__(scheduler, vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, transformer, None, None)
         self.t5_embedding = nn.Embedding(10, 4096)
         self.task_embedding = nn.Embedding(2, 3072)
         self.idx_embedding = nn.Embedding(10, 3072)
+        self.is_nunchaku = False # nunchaku mark
+        self.gr_progress = None
+        
+    def update_gr_progress(self, value, desc):
+        if self.gr_progress is not None:
+            self.gr_progress(value, desc=desc)
 
     def load_dreamo_model(self, device, use_turbo=True, version='v1.1'):
         # download models and load file
@@ -118,6 +124,105 @@ class DreamOPipeline(FluxPipeline):
         self.t5_embedding = self.t5_embedding.to(device)
         self.task_embedding = self.task_embedding.to(device)
         self.idx_embedding = self.idx_embedding.to(device)
+        
+        
+    
+    # Using nunchaku
+    def load_dreamo_model_nunchaku(self, device, use_turbo=True, version='v1.1'):
+        
+        try:
+            # The current version has been tested: nunchaku v0.3.x
+            from nunchaku import NunchakuFluxTransformer2dModel
+            from nunchaku.lora.flux.compose import compose_lora
+            NunchakuFluxTransformer2dModel.forward = flux_transformer_forward
+        except Exception as e:
+            raise ValueError("👉️ To use this you need to install nunchaku")
+        
+        # download models and load file
+        if version == 'v1':#Add commentMore actions
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_quality_lora_pos.safetensors', local_dir='models')
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_quality_lora_neg.safetensors', local_dir='models')
+            quality_lora_pos = load_file('models/dreamo_quality_lora_pos.safetensors')
+            quality_lora_neg = load_file('models/dreamo_quality_lora_neg.safetensors')
+        elif version == 'v1.1':
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='v1.1/dreamo_sft_lora.safetensors', local_dir='models')
+            hf_hub_download(repo_id='ByteDance/DreamO', filename='v1.1/dreamo_dpo_lora.safetensors', local_dir='models')
+            sft_lora = load_file('models/v1.1/dreamo_sft_lora.safetensors')
+            dpo_lora = load_file('models/v1.1/dreamo_dpo_lora.safetensors')
+        else:
+            raise ValueError(f'there is no {version}')
+        
+        
+        # download models and load file
+        print(f'load main lora ...')
+        hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo.safetensors', local_dir='models')
+        hf_hub_download(repo_id='ByteDance/DreamO', filename='dreamo_cfg_distill.safetensors', local_dir='models')
+        dreamo_lora = load_file('models/dreamo.safetensors')
+        cfg_distill_lora = load_file('models/dreamo_cfg_distill.safetensors')
+
+        # load embedding
+        self.t5_embedding.weight.data = dreamo_lora.pop('dreamo_t5_embedding.weight')[-10:]
+        self.task_embedding.weight.data = dreamo_lora.pop('dreamo_task_embedding.weight')
+        self.idx_embedding.weight.data = dreamo_lora.pop('dreamo_idx_embedding.weight')
+        self._prepare_t5()
+
+        # main lora
+        dreamo_lora = convert_flux_lora_to_diffusers(dreamo_lora)
+        cfg_distill_lora = convert_flux_lora_to_diffusers(cfg_distill_lora)
+        
+        # others lora
+        others = []
+        
+        # turbo_lora 如果使用 nunchaku，建议加载！可有效减少生成步数！
+        use_turbo = True # 建议强制开启
+        if use_turbo:
+            print(f'load turbo lora ...')
+            hf_hub_download("alimama-creative/FLUX.1-Turbo-Alpha", "diffusion_pytorch_model.safetensors", local_dir='models')
+            turbo_lora = load_file('models/diffusion_pytorch_model.safetensors')
+            # 添加到lora列表
+            others.append((turbo_lora, 1))
+
+        
+        if version == 'v1':
+            # quality loras, one pos, one neg
+            convert_flux_lora_to_diffusers(quality_lora_pos)
+            convert_flux_lora_to_diffusers(quality_lora_neg)
+            # 添加到lora列表
+            others.append((quality_lora_pos, 0.15))
+            others.append((quality_lora_neg, -0.8))
+        elif version == 'v1.1':
+            # 添加到lora列表
+            others.append((sft_lora, 1))
+            others.append((dpo_lora, 1.25))
+            pass
+        
+        
+        # 可选加载第三方增强LoRA：皮肤白皙去除塑料
+        # enhance_lora = load_file('models/loras/F1_皮肤白皙去除塑料.safetensors')
+        # others.append((enhance_lora, 1))
+        
+        # nunchaku lora
+        composed_lora = compose_lora(
+            [
+                (dreamo_lora, 1), 
+                (cfg_distill_lora, 1),
+            ] + others
+        )
+        if isinstance(self.transformer, NunchakuFluxTransformer2dModel):
+            print("======== update_nunchaku_lora_params ========")
+            self.transformer.update_lora_params(composed_lora)
+            self.transformer = self.transformer.to(device)
+            # FP16 注意力实现，可在 NVIDIA 30、40 甚至 50 系列 GPU 上实现高达 1.2× 的性能提升 ，而不会降低精度。
+            self.transformer.set_attention_impl("nunchaku-fp16")
+            self.is_nunchaku = True
+        else:
+            raise ValueError(f'The transformer model must be nunchaku SVDQuant')
+
+        self.unload_lora_weights()
+
+        self.t5_embedding = self.t5_embedding.to(device)
+        self.task_embedding = self.task_embedding.to(device)
+        self.idx_embedding = self.idx_embedding.to(device)
 
     def _prepare_t5(self):
         self.text_encoder_2.resize_token_embeddings(len(self.tokenizer_2))
@@ -130,9 +235,9 @@ class DreamOPipeline(FluxPipeline):
 
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype, start_height=0, start_width=0):
-        latent_image_ids = torch.zeros(height // 2, width // 2, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height // 2)[:, None] + start_height
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width // 2)[None, :] + start_width
+        latent_image_ids = torch.zeros(height, width, 3)
+        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None] + start_height
+        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :] + start_width
 
         latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
 
@@ -279,6 +384,9 @@ class DreamOPipeline(FluxPipeline):
 
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
+        
+        # progress
+        self.update_gr_progress(0.0, "Preprocessing, please wait...")
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -377,7 +485,7 @@ class DreamOPipeline(FluxPipeline):
             cur_width = ref_latent.shape[3]
             ref_latent = self._pack_latents(ref_latent, batch_size, num_channels_latents, cur_height, cur_width)
             ref_latent_image_ids = self._prepare_latent_image_ids(
-                batch_size, cur_height, cur_width, device, prompt_embeds.dtype, start_height, start_width
+                batch_size, cur_height//2, cur_width//2, device, prompt_embeds.dtype, start_height, start_width
             )
             start_height += cur_height // 2
             start_width += cur_width // 2
@@ -431,6 +539,7 @@ class DreamOPipeline(FluxPipeline):
             self._joint_attention_kwargs = {}
 
         # 6. Denoising loop
+        self.update_gr_progress(0.0, "inference_steps...")
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -487,12 +596,14 @@ class DreamOPipeline(FluxPipeline):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                    self.update_gr_progress((i+1)/num_inference_steps, f"inference steps：（{(i+1)}/{num_inference_steps}）...")
 
         self._current_timestep = None
 
-        if self.offload:
+        # nunchaku automatic
+        if self.offload and not self.is_nunchaku:
             self.transformer.cpu()
-            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
 
         if output_type == "latent":
             image = latents
@@ -502,8 +613,9 @@ class DreamOPipeline(FluxPipeline):
             image = self.vae.decode(latents, return_dict=False)[0]
             image = self.image_processor.postprocess(image, output_type=output_type)
 
-        # Offload all models
+        # # Offload all models
         self.maybe_free_model_hooks()
+        torch.cuda.empty_cache()
 
         if not return_dict:
             return (image,)

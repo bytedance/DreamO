@@ -16,131 +16,51 @@
 # os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
 import argparse
 
-import cv2
-import gradio as gr
-import numpy as np
 import torch
-from facexlib.utils.face_restoration_helper import FaceRestoreHelper
-from huggingface_hub import hf_hub_download
-from optimum.quanto import freeze, qint8, quantize
-from PIL import Image
-from torchvision.transforms.functional import normalize
-
-from dreamo.dreamo_pipeline import DreamOPipeline
-from dreamo.utils import (
-    img2tensor,
-    resize_numpy_image_area,
-    resize_numpy_image_long,
-    tensor2img,
-)
-from tools import BEN2
+import gradio as gr
+from dreamo_generator import Generator
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=8080)
 parser.add_argument('--version', type=str, default='v1.1')
-parser.add_argument('--no_turbo', action='store_true')
-parser.add_argument('--int8', action='store_true')
-parser.add_argument('--offload', action='store_true')
-parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cuda, mps, or cpu')
+parser.add_argument('--offload', action='store_true', default=True, help="Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.")
+parser.add_argument('--no_turbo', action='store_true', default=False, help='Use turbo to reduce the original 50 steps to 12 steps.')
+parser.add_argument('--quant', type=str, default='nunchaku', help='Quantize to use: default, int8, nunchaku')  # default, int8, nunchaku
+parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cuda, mps, or cpu') # auto, cuda, mps, or cpu
 args = parser.parse_args()
 
 
-def get_device():
-    """Automatically detect the best available device"""
-    if args.device != 'auto':
-        return torch.device(args.device)
-    
-    if torch.cuda.is_available():
-        return torch.device('cuda')
-    elif torch.backends.mps.is_available():
-        return torch.device('mps')
-    else:
-        return torch.device('cpu')
+# ✨️ 温馨提示：消费级 16G 以下显卡, 建议启用 'quant=nunchaku' 。低显存 2-4 倍快速推理，小于 20 秒生成图像（1024x1024）~
+# -------------------------------------------------------------------------------------------------------------------
+# Tips: For consumer-grade graphics cards below 16G, it is recommended to enable quant=nunchaku.
+# 2-4 times faster reasoning with low VRAM, generating images（1024x1024） in less than 20 seconds~
+# -------------------------------------------------------------------------------------------------------------------
 
+# 👉️ Parameter Description: quant = 'nunchaku', no_turbo = False, offload = True
+# -------------------------------------------------------------------------------------------------------------------
+# [ no_turbo = False ]:  Use 'turbo' to reduce the original 50 steps to 12 steps.
+# [ offload = True   ]:  Enable 'quant=nunchaku' and 'offload' to reduce the original 24GB VRAM to 6.5GB.
+# -------------------------------------------------------------------------------------------------------------------
 
-class Generator:
-    def __init__(self):
-        self.device = get_device()
-        print(f"Using device: {self.device}")
-        
-        # preprocessing models
-        # background remove model: BEN2
-        self.bg_rm_model = BEN2.BEN_Base().to(self.device).eval()
-        hf_hub_download(repo_id='PramaLLC/BEN2', filename='BEN2_Base.pth', local_dir='models')
-        self.bg_rm_model.loadcheckpoints('models/BEN2_Base.pth')
-        # face crop and align tool: facexlib
-        self.face_helper = FaceRestoreHelper(
-            upscale_factor=1,
-            face_size=512,
-            crop_ratio=(1, 1),
-            det_model='retinaface_resnet50',
-            save_ext='png',
-            device=self.device,
-        )
-        if args.offload:
-            self.ben_to_device(torch.device('cpu'))
-            self.facexlib_to_device(torch.device('cpu'))
+# 👉️ Inference VRAM usage: For example, NVIDIA RTX 3080-10G 
+# -------------------------------------------------------------------------------------------------------------------
+# [ quant= 'default' ]:  offload, 24GB  VRAM.  ⚠️ CUDA out of memory.
+# [ quant= 'int8'    ]:  offload, 16GB  VRAM.  ⚠️ CUDA out of memory.
+# [ quant= 'nunchaku']:  offload, 6.5GB VRAM.  ✅️ Working fine! So it supports consumer-grade GPUs (8GB or higher) now.
+# -------------------------------------------------------------------------------------------------------------------
 
-        # load dreamo
-        model_root = 'black-forest-labs/FLUX.1-dev'
-        dreamo_pipeline = DreamOPipeline.from_pretrained(model_root, torch_dtype=torch.bfloat16)
-        dreamo_pipeline.load_dreamo_model(self.device, use_turbo=not args.no_turbo)
-        if args.int8:
-            print('start quantize')
-            quantize(dreamo_pipeline.transformer, qint8)
-            freeze(dreamo_pipeline.transformer)
-            quantize(dreamo_pipeline.text_encoder_2, qint8)
-            freeze(dreamo_pipeline.text_encoder_2)
-            print('done quantize')
-        self.dreamo_pipeline = dreamo_pipeline.to(self.device)
-        if args.offload:
-            self.dreamo_pipeline.enable_model_cpu_offload()
-            self.dreamo_pipeline.offload = True
-        else:
-            self.dreamo_pipeline.offload = False
-
-    def ben_to_device(self, device):
-        self.bg_rm_model.to(device)
-
-    def facexlib_to_device(self, device):
-        self.face_helper.face_det.to(device)
-        self.face_helper.face_parse.to(device)
-
-    @torch.no_grad()
-    def get_align_face(self, img):
-        # the face preprocessing code is same as PuLID
-        self.face_helper.clean_all()
-        image_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        self.face_helper.read_image(image_bgr)
-        self.face_helper.get_face_landmarks_5(only_center_face=True)
-        self.face_helper.align_warp_face()
-        if len(self.face_helper.cropped_faces) == 0:
-            return None
-        align_face = self.face_helper.cropped_faces[0]
-
-        input = img2tensor(align_face, bgr2rgb=True).unsqueeze(0) / 255.0
-        input = input.to(self.device)
-        parsing_out = self.face_helper.face_parse(normalize(input, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))[0]
-        parsing_out = parsing_out.argmax(dim=1, keepdim=True)
-        bg_label = [0, 16, 18, 7, 8, 9, 14, 15]
-        bg = sum(parsing_out == i for i in bg_label).bool()
-        white_image = torch.ones_like(input)
-        # only keep the face features
-        face_features_image = torch.where(bg, white_image, input)
-        face_features_image = tensor2img(face_features_image, rgb2bgr=False)
-
-        return face_features_image
-
-
-generator = Generator()
+# DreamO Generator
+generator = Generator(**vars(args))
 
 
 @torch.inference_mode()
 def generate_image(
     ref_image1,
     ref_image2,
+    ref_image3,
     ref_task1,
     ref_task2,
+    ref_task3,
     prompt,
     width,
     height,
@@ -154,46 +74,20 @@ def generate_image(
     neg_prompt,
     neg_guidance,
     first_step_guidance,
+    progress=gr.Progress(),
 ):
     print(prompt)
-    ref_conds = []
-    debug_images = []
+    
+    # Input condition preprocessing torch.Size([1, 3, 576, 432])
+    ref_conds, debug_images, seed = generator.pre_condition(
+        ref_images=[ref_image1, ref_image2, ref_image3],
+        ref_tasks=[ref_task1, ref_task2, ref_task3],
+        ref_res=ref_res,
+        seed=seed,
+        )
 
-    ref_images = [ref_image1, ref_image2]
-    ref_tasks = [ref_task1, ref_task2]
-
-    for idx, (ref_image, ref_task) in enumerate(zip(ref_images, ref_tasks)):
-        if ref_image is not None:
-            if ref_task == "id":
-                if args.offload:
-                    generator.facexlib_to_device(generator.device)
-                ref_image = resize_numpy_image_long(ref_image, 1024)
-                ref_image = generator.get_align_face(ref_image)
-                if args.offload:
-                    generator.facexlib_to_device(torch.device('cpu'))
-            elif ref_task != "style":
-                if args.offload:
-                    generator.ben_to_device(generator.device)
-                ref_image = generator.bg_rm_model.inference(Image.fromarray(ref_image))
-                if args.offload:
-                    generator.ben_to_device(torch.device('cpu'))
-            if ref_task != "id":
-                ref_image = resize_numpy_image_area(np.array(ref_image), ref_res * ref_res)
-            debug_images.append(ref_image)
-            ref_image = img2tensor(ref_image, bgr2rgb=False).unsqueeze(0) / 255.0
-            ref_image = 2 * ref_image - 1.0
-            ref_conds.append(
-                {
-                    'img': ref_image,
-                    'task': ref_task,
-                    'idx': idx + 1,
-                }
-            )
-
-    seed = int(seed)
-    if seed == -1:
-        seed = torch.Generator(device="cpu").seed()
-
+    print("start dreamo_pipeline... ")
+    generator.dreamo_pipeline.gr_progress = progress
     image = generator.dreamo_pipeline(
         prompt=prompt,
         width=width,
@@ -209,7 +103,7 @@ def generate_image(
         neg_guidance_scale=neg_guidance,
         first_step_guidance_scale=first_step_guidance if first_step_guidance > 0 else guidance,
     ).images[0]
-
+    
     return image, debug_images, seed
 
 
@@ -220,6 +114,7 @@ _HEADER_ = '''
 </div>
 
 🚩 Update Notes:
+- 2025.06.25: Use Nunchaku to achieve <7GB VRAM inference and 2-4 times faster inference. by juntaosun.  
 - 2025.06.24: Updated to v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics. <a href='https://github.com/bytedance/DreamO/blob/main/dreamo_v1.1.md' target='_blank'>Learn more about this model</a>
 - 2025.05.11: We have updated the model to mitigate over-saturation and plastic-face issues. The new version shows consistent improvements over the previous release.
 
@@ -247,16 +142,23 @@ def create_demo():
         with gr.Row():
             with gr.Column():
                 with gr.Row():
-                    ref_image1 = gr.Image(label="ref image 1", type="numpy", height=256)
-                    ref_image2 = gr.Image(label="ref image 2", type="numpy", height=256)
+                    ref_image1 = gr.Image(label="ref image 1", type="numpy", height=256) # 参考图 1
+                    ref_image2 = gr.Image(label="ref image 2", type="numpy", height=256) # 参考图 2
+                    ref_image3 = gr.Image(label="ref image 3", type="numpy", height=256) # 参考图 3
                 with gr.Row():
-                    ref_task1 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 1")
-                    ref_task2 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 2")
+                    with gr.Group():
+                        ref_task1 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 1")
+                    with gr.Group():
+                        ref_task2 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 2")
+                    with gr.Group():
+                        ref_task3 = gr.Dropdown(choices=["ip", "id", "style"], value="ip", label="task for ref image 3")
                 prompt = gr.Textbox(label="Prompt", value="a person playing guitar in the street")
+                generate_btn = gr.Button("🎉 Generate")
+                
                 width = gr.Slider(768, 1024, 1024, step=16, label="Width")
                 height = gr.Slider(768, 1024, 1024, step=16, label="Height")
-                num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps")
-                guidance = gr.Slider(1.0, 10.0, 4.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance")
+                num_steps = gr.Slider(8, 30, 12, step=1, label="Number of steps") # 默认步数 12
+                guidance = gr.Slider(1.0, 10.0, 3.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance") # 建议 3.5
                 seed = gr.Textbox(label="Seed (-1 for random)", value="-1")
                 ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image, increase it if necessary")
                 with gr.Accordion("Advanced Options", open=False, visible=False):
@@ -266,7 +168,6 @@ def create_demo():
                     cfg_start_step = gr.Slider(0, 30, 0, step=1, label="cfg start step")
                     cfg_end_step = gr.Slider(0, 30, 0, step=1, label="cfg end step")
                     first_step_guidance = gr.Slider(0, 10, 0, step=0.1, label="first step guidance")
-                generate_btn = gr.Button("Generate")
                 gr.Markdown(_CITE_)
 
             with gr.Column():
@@ -398,8 +299,10 @@ def create_demo():
             inputs=[
                 ref_image1,
                 ref_image2,
+                ref_image3,
                 ref_task1,
                 ref_task2,
+                ref_task3,
                 prompt,
                 width,
                 height,

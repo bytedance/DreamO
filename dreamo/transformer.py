@@ -88,17 +88,29 @@ def flux_transformer_forward(
     hidden_states = self.x_embedder(hidden_states)
     # add task and idx embedding
     if embeddings is not None:
+        # Ensure embeddings is on the same device as hidden_states
+        if embeddings.device != hidden_states.device:
+            embeddings = embeddings.to(hidden_states.device)
         hidden_states = hidden_states + embeddings
 
-    timestep = timestep.to(hidden_states.dtype) * 1000
-    guidance = guidance.to(hidden_states.dtype) * 1000 if guidance is not None else None
+    # Ensure timestep is on the correct device and maintains its dtype for scaling,
+    # then ensure it's LongTensor for time_text_embed
+    original_timestep_dtype = timestep.dtype
+    timestep_scaled = timestep.to(hidden_states.device, dtype=hidden_states.dtype) * 1000
+
+    temb_guidance = None
+    if guidance is not None:
+        # Ensure guidance is on the correct device and maintains its dtype for scaling
+        original_guidance_dtype = guidance.dtype
+        guidance_scaled = guidance.to(hidden_states.device, dtype=hidden_states.dtype) * 1000
+        temb_guidance = guidance_scaled
 
     temb = (
-        self.time_text_embed(timestep, pooled_projections)
+        self.time_text_embed(timestep_scaled.long() if hidden_states.dtype == torch.float32 else timestep_scaled, pooled_projections.to(hidden_states.device)) # Ensure pooled_projections is also on the correct device
         if guidance is None
-        else self.time_text_embed(timestep, guidance, pooled_projections)
+        else self.time_text_embed(timestep_scaled.long() if hidden_states.dtype == torch.float32 else timestep_scaled, temb_guidance, pooled_projections.to(hidden_states.device)) # Ensure pooled_projections is also on the correct device
     )
-    encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+    encoder_hidden_states = self.context_embedder(encoder_hidden_states.to(hidden_states.device)) # Ensure encoder_hidden_states is on the correct device
 
     if txt_ids.ndim == 3:
         # logger.warning(

@@ -141,3 +141,4 @@ dmypy.json
 .pyre/
 
 .idea/
+.vscode/
