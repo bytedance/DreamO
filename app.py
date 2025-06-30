@@ -54,6 +54,18 @@ args = parser.parse_args()
 # DreamO Generator
 generator = Generator(**vars(args))
 
+USE_NUNCHAKU = (args.quant == "nunchaku")
+
+if USE_NUNCHAKU:
+    try:
+        from nunchaku.caching.diffusers_adapters.flux import apply_cache_on_pipe
+    except ImportError:
+        raise ValueError(
+            "\n--------------------------------------------------------------------\n"
+            "👉️ Missing nunchaku, please install from:\n"
+            "https://github.com/mit-han-lab/nunchaku/releases/\n"
+            "--------------------------------------------------------------------\n"
+        )
 
 @torch.inference_mode()
 def generate_image(
@@ -74,6 +86,9 @@ def generate_image(
     neg_prompt,
     neg_guidance,
     first_step_guidance,
+    use_doubleFBCache,
+    residual_diff_threshold,
+    residual_diff_threshold_single
 ):
     ref_conds, debug_images, seed = generator.pre_condition(
         ref_images=[ref_image1, ref_image2],
@@ -82,6 +97,8 @@ def generate_image(
         seed=seed,
         )
     print(prompt, seed)
+    if USE_NUNCHAKU and residual_diff_threshold is not None:
+        apply_cache_on_pipe(generator.dreamo_pipeline,use_double_fb_cache=use_doubleFBCache, residual_diff_threshold=float(residual_diff_threshold),residual_diff_threshold_single=float(residual_diff_threshold_single))
 
     print("start dreamo_pipeline... ")
     image = generator.dreamo_pipeline(
@@ -154,6 +171,11 @@ def create_demo():
                 guidance = gr.Slider(1.0, 10.0, 4.5 if args.version == 'v1.1' else 3.5, step=0.1, label="Guidance")
                 seed = gr.Textbox(label="Seed (-1 for random)", value="-1")
                 ref_res = gr.Slider(512, 1024, 512, step=16, label="resolution for ref image, increase it if necessary")
+                use_doubleFBCache = gr.Checkbox(label="Use Double FB Cache", value=False, visible=USE_NUNCHAKU)
+                residual_diff_threshold = gr.Textbox(label="Multi-Residual Diff Threshold", value="0.00",visible=USE_NUNCHAKU)
+                residual_diff_threshold_single = gr.Textbox(label="Single-Residual Diff Threshold", value="0.00",visible=USE_NUNCHAKU)
+                
+                
                 with gr.Accordion("Advanced Options", open=False, visible=False):
                     neg_prompt = gr.Textbox(label="Neg Prompt", value="")
                     neg_guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Neg Guidance")
@@ -307,6 +329,9 @@ def create_demo():
                 neg_prompt,
                 neg_guidance,
                 first_step_guidance,
+                use_doubleFBCache,
+                residual_diff_threshold,
+                residual_diff_threshold_single,
             ],
             outputs=[output_image, debug_image, seed_output],
         )
