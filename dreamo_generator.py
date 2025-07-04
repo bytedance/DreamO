@@ -223,7 +223,7 @@ class Generator:
                 )
         # cleaning
         self.torch_empty_cache()
-        seed = torch.Generator(device="cpu").seed() if seed == -1 else int(seed)
+        seed = torch.Generator(device="cpu").seed() if seed == "-1" else int(seed)
         return ref_conds, debug_images, seed
     
     # Try cleaning the GPU
