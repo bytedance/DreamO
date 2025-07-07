@@ -109,7 +109,6 @@ class Generator:
         try:
             # 依赖检测：The current version has been tested: nunchaku v0.3.x
             from nunchaku import NunchakuFluxTransformer2dModel
-            from nunchaku.caching.diffusers_adapters.flux import apply_cache_on_pipe # flux
             from nunchaku.utils import get_precision
         except Exception as e:
             message = "\n--------------------------------------------------------------------\n"
@@ -144,7 +143,6 @@ class Generator:
             
         print(f"\n[Profiler] Moving final DreamOPipeline to device ({self.device})...")
         to_device_start_time = time.time()
-        apply_cache_on_pipe(self.dreamo_pipeline, residual_diff_threshold=0.05)
         if self.offload:
             self.dreamo_pipeline.enable_sequential_cpu_offload()
             self.dreamo_pipeline.offload = True
