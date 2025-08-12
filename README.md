@@ -5,8 +5,9 @@ Official implementation of **[DreamO: A Unified Framework for Image Customizatio
 [![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2504.16915) [![demo](https://img.shields.io/badge/🤗-HuggingFace_Demo-orange)](https://huggingface.co/spaces/ByteDance/DreamO) <br>
 
 ### :triangular_flag_on_post: Updates
-* **2025.06.26**: [Nunchaku](https://github.com/mit-han-lab/nunchaku) is now supported for model quantization.
+* **2025.08.11**: 🎉 DreamO accepted by SIGGRAPH Asia 2025!
 * **2025.06.24**: 🔥🔥**We are excited to release DreamO v1.1 with significant improvements in image quality, reduced likelihood of body composition errors, and enhanced aesthetics**. [Learn more about the model](dreamo_v1.1.md)
+* **2025.06.26**: [Nunchaku](https://github.com/mit-han-lab/nunchaku) is now supported for model quantization.
 * **2025.05.30**: 🔥 Native [ComfyUI implementation](https://github.com/ToTheBeginning/ComfyUI-DreamO) is now available!
 * **2025.05.12**: Support consumer-grade GPUs (16GB or 24GB) now, see [here](#for-consumer-grade-gpus) for instruction
 * **2025.05.11**: We have updated the model to mitigate over-saturation and plastic-face issue. The new version shows consistent improvements over the previous release. Please check it out!
